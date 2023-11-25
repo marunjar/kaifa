@@ -489,6 +489,7 @@ except Exception as e:
     print("Could not initialize logging system: " + str(e))
     sys.exit(20)
 
+g_log.info("kaifareader started...")
 
 g_ser = serial.Serial(
         port = g_cfg.get_port(),

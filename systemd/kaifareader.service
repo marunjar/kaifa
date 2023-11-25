@@ -1,15 +1,21 @@
 [Unit]
 Description=kaifareader
-Wants=network-online.target
-After=network-online.target
+#Wants=network-online.target
+#After=network-online.target
+#After=syslog.target network.target ntp.service
 
 [Service]
 ExecStartPre=/bin/mkdir -p /var/run/kaifareader
 ExecStartPre=/bin/mkdir -p /var/log/kaifareader
 ExecStartPre=/bin/chmod 777 /var/run/kaifareader
 ExecStartPre=/bin/chmod 777 /var/log/kaifareader
+ExecStartPre=raspi-gpio set 26 op
+ExecStartPre=raspi-gpio set 26 dh
+ExecStartPre=/bin/sleep 2
 ExecStart=/usr/bin/python3 /usr/lib/kaifareader/kaifareader.py
+ExecStartPost=raspi-gpio set 26 dl
 StandardOutput=null
+TimeoutStartSec=10s
 
 [Install]
 WantedBy=multi-user.target
