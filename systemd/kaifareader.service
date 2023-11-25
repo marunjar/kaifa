@@ -13,7 +13,7 @@ ExecStartPre=raspi-gpio set 26 op
 ExecStartPre=raspi-gpio set 26 dh
 ExecStartPre=/bin/sleep 2
 ExecStart=/usr/bin/python3 /usr/lib/kaifareader/kaifareader.py
-ExecStartPost=raspi-gpio set 26 dl
+ExecStopPost=raspi-gpio set 26 dl
 StandardOutput=null
 TimeoutStartSec=10s
 
