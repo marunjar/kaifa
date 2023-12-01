@@ -550,7 +550,7 @@ while True:
     # "telegram fetching loop" (as long as we have found two full telegrams)
     # frame1 = first telegram (68fafa68), frame2 = second telegram (68727268)
     while True:
-        bytesWaiting = ser.inWaiting()
+        bytesWaiting = g_ser.inWaiting()
         if bytesWaiting != 0:
             # Read in chunks. Each chunk will wait as long as specified by
             # serial timeout. As the meters we tested send data every 5s the
@@ -566,12 +566,12 @@ while True:
                (frame2_start_pos <= 0) or
                (stream[-1:] != g_supplier.frame2_end_bytes)
                ):
-                g_log.debug("pos: {} | {} ".format(frame1_start_pos, frame2_start_pos))
+                g_log.debug("pos: {} | {} --- BAD".format(frame1_start_pos, frame2_start_pos))
                 g_log.debug("incomplete segment: {} ".format(binascii.hexlify(stream)))
-                g_log.debug("received chunk: {} ".format(binascii.hexlify(byte_chunk))
+                g_log.debug("received chunk: {} ".format(binascii.hexlify(byte_chunk)))
                 continue
 
-            g_log.debug("pos: {} | {}".format(frame1_start_pos, frame2_start_pos))
+            g_log.debug("pos: {} | {} --- GOOD".format(frame1_start_pos, frame2_start_pos))
 
             if (frame2_start_pos != -1):
                 # frame2_start_pos could be smaller than frame1_start_pos
@@ -606,7 +606,7 @@ while True:
                 g_log.debug("TELEGRAM2:\n{}\n".format(binascii.hexlify(frame2)))
 
                 break
-        else
+        else:
             time.sleep(timeout)
 
     dec = Decrypt(g_supplier, frame1, frame2, g_cfg.get_key_hex_string())
