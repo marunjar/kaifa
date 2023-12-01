@@ -10,6 +10,7 @@ import signal
 import logging
 from logging.handlers import RotatingFileHandler
 import paho.mqtt.client as mqtt
+import time
 
 #
 # Trap CTRL+C
@@ -483,8 +484,6 @@ def mqtt_on_disconnect(client, userdata, rc):
 # Script Start
 #
 
-serial_read_chunk_size=100
-
 g_cfg = Config(Constants.config_file)
 
 if not g_cfg.load():
@@ -506,8 +505,11 @@ g_ser = serial.Serial(
         baudrate = g_cfg.get_baud(),
         parity = g_cfg.get_parity(),
         stopbits = g_cfg.get_stopbits(),
-        bytesize = g_cfg.get_bytesize(),
-        timeout = g_cfg.get_interval())
+        bytesize = g_cfg.get_bytesize())
+
+timeout = g_cfg.get_interval()
+if timeout <= 0:
+    timeout = 0.01
 
 if g_cfg.get_supplier().upper() == SupplierTINETZ.name:
     g_supplier = SupplierTINETZ()
@@ -541,62 +543,64 @@ while True:
     # "telegram fetching loop" (as long as we have found two full telegrams)
     # frame1 = first telegram (68fafa68), frame2 = second telegram (68727268)
     while True:
+        bytesWaiting = ser.inWaiting()
+        if bytesWaiting != 0:
+            # Read in chunks. Each chunk will wait as long as specified by
+            # serial timeout. As the meters we tested send data every 5s the
+            # timeout must be <5. Lower timeouts make us fail quicker.
+            byte_chunk = g_ser.read(bytesWaiting)
+            stream += byte_chunk
+            frame1_start_pos = stream.find(g_supplier.frame1_start_bytes)
+            frame2_start_pos = stream.find(g_supplier.frame2_start_bytes)
 
-        # Read in chunks. Each chunk will wait as long as specified by
-        # serial timeout. As the meters we tested send data every 5s the
-        # timeout must be <5. Lower timeouts make us fail quicker. 
-        byte_chunk = g_ser.read(size=serial_read_chunk_size)
-        stream += byte_chunk
-        frame1_start_pos = stream.find(g_supplier.frame1_start_bytes)
-        frame2_start_pos = stream.find(g_supplier.frame2_start_bytes)
-
-        # fail as early as possible if we find the segment is not complete yet. 
-        if (
-           (stream.find(g_supplier.frame1_start_bytes) < 0) or
-           (stream.find(g_supplier.frame2_start_bytes) <= 0) or
-           (stream[-1:] != g_supplier.frame2_end_bytes) or
-           (len(byte_chunk) == serial_read_chunk_size)
-           ):
-            g_log.debug("pos: {} | {}".format(frame1_start_pos, frame2_start_pos))
-            g_log.debug("incomplete segment: {} ".format(stream))
-            g_log.debug("received chunk: {} ".format(byte_chunk))
-            continue
-
-        g_log.debug("pos: {} | {}".format(frame1_start_pos, frame2_start_pos))
-
-        if (frame2_start_pos != -1):
-            # frame2_start_pos could be smaller than frame1_start_pos
-            if frame2_start_pos < frame1_start_pos:
-                # start over with the stream from frame1 pos
-                stream = stream[frame1_start_pos:len(stream)]
+            # fail as early as possible if we find the segment is not complete yet.
+            if (
+               (frame1_start_pos < 0) or
+               (frame2_start_pos <= 0) or
+               (stream[-1:] != g_supplier.frame2_end_bytes)
+               ):
+                g_log.debug("pos: {} | {} ".format(frame1_start_pos, frame2_start_pos))
+                g_log.debug("incomplete segment: {} ".format(binascii.hexlify(stream)))
+                g_log.debug("received chunk: {} ".format(binascii.hexlify(byte_chunk))
                 continue
 
-            # we have found at least two complete telegrams
-            regex = binascii.unhexlify('28'+g_supplier.frame1_start_bytes_hex+'7c'+g_supplier.frame2_start_bytes_hex+'29')  # re = '(..|..)'
-            l = re.split(regex, stream)
-            l = list(filter(None, l))  # remove empty elements
-            # l after split (here in following example in hex)
-            # l = ['68fafa68', '53ff00...faecc16', '68727268', '53ff...3d16', '68fafa68', '53ff...d916', '68727268', '53ff.....']
+            g_log.debug("pos: {} | {}".format(frame1_start_pos, frame2_start_pos))
 
-            g_log.debug(binascii.hexlify(stream))
-            g_log.debug(l)
+            if (frame2_start_pos != -1):
+                # frame2_start_pos could be smaller than frame1_start_pos
+                if frame2_start_pos < frame1_start_pos:
+                    # start over with the stream from frame1 pos
+                    stream = stream[frame1_start_pos:len(stream)]
+                    continue
 
-            # take the first two matching telegrams
-            for i, el in enumerate(l):
-                if el == g_supplier.frame1_start_bytes:
-                    frame1 = l[i] + l[i+1]
-                    frame2 = l[i+2] + l[i+3]
-                    break
+                # we have found at least two complete telegrams
+                regex = binascii.unhexlify('28'+g_supplier.frame1_start_bytes_hex+'7c'+g_supplier.frame2_start_bytes_hex+'29')  # re = '(..|..)'
+                l = re.split(regex, stream)
+                l = list(filter(None, l))  # remove empty elements
+                # l after split (here in following example in hex)
+                # l = ['68fafa68', '53ff00...faecc16', '68727268', '53ff...3d16', '68fafa68', '53ff...d916', '68727268', '53ff.....']
 
-            # check for weird result -> exit
-            if (len(frame1) == 0) or (len(frame2) == 0):
-                g_log.error("Frame1 or Frame2 is empty: {} | {}".format(frame1, frame2))
-                sys.exit(30)
+                g_log.debug(binascii.hexlify(stream))
+                g_log.debug(l)
 
-            g_log.debug("TELEGRAM1:\n{}\n".format(binascii.hexlify(frame1)))
-            g_log.debug("TELEGRAM2:\n{}\n".format(binascii.hexlify(frame2)))
+                # take the first two matching telegrams
+                for i, el in enumerate(l):
+                    if el == g_supplier.frame1_start_bytes:
+                        frame1 = l[i] + l[i+1]
+                        frame2 = l[i+2] + l[i+3]
+                        break
 
-            break
+                # check for weird result -> exit
+                if (len(frame1) == 0) or (len(frame2) == 0):
+                    g_log.error("Frame1 or Frame2 is empty: {} | {}".format(frame1, frame2))
+                    sys.exit(30)
+
+                g_log.debug("TELEGRAM1:\n{}\n".format(binascii.hexlify(frame1)))
+                g_log.debug("TELEGRAM2:\n{}\n".format(binascii.hexlify(frame2)))
+
+                break
+        else
+            time.sleep(timeout)
 
     dec = Decrypt(g_supplier, frame1, frame2, g_cfg.get_key_hex_string())
     dec.parse_all()
